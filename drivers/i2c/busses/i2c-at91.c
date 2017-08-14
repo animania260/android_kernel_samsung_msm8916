@@ -273,14 +273,8 @@ error:
 
 static void at91_twi_read_next_byte(struct at91_twi_dev *dev)
 {
-	/*
-	 * If we are in this case, it means there is garbage data in RHR, so
-	 * delete them.
-	 */
-	if (!dev->buf_len) {
-		at91_twi_read(dev, AT91_TWI_RHR);
+	if (dev->buf_len <= 0)
 		return;
-	}
 
 	*dev->buf = at91_twi_read(dev, AT91_TWI_RHR) & 0xff;
 	--dev->buf_len;
@@ -435,6 +429,7 @@ static int at91_do_twi_transfer(struct at91_twi_dev *dev)
 {
 	int ret;
 	bool has_unre_flag = dev->pdata->has_unre_flag;
+	unsigned sr;
 
 	/*
 	 * WARNING: the TXCOMP bit in the Status Register is NOT a clear on
@@ -471,13 +466,18 @@ static int at91_do_twi_transfer(struct at91_twi_dev *dev)
 	dev->transfer_status = 0;
 
 	/* Clear pending interrupts, such as NACK. */
-	at91_twi_read(dev, AT91_TWI_SR);
+	sr = at91_twi_read(dev, AT91_TWI_SR);
 
 	if (!dev->buf_len) {
 		at91_twi_write(dev, AT91_TWI_CR, AT91_TWI_QUICK);
 		at91_twi_write(dev, AT91_TWI_IER, AT91_TWI_TXCOMP);
 	} else if (dev->msg->flags & I2C_M_RD) {
 		unsigned start_flags = AT91_TWI_START;
+
+		if (sr & AT91_TWI_RXRDY) {
+			dev_err(dev->dev, "RXRDY still set!");
+			at91_twi_read(dev, AT91_TWI_RHR);
+		}
 
 		/* if only one byte is to be read, immediately stop transfer */
 		if (dev->buf_len <= 1 && !(dev->msg->flags & I2C_M_RECV_LEN))
